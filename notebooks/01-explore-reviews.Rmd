@@ -1,3 +1,10 @@
+---
+title: "02-preparing-text-for-modeling"
+output: html_document
+date: '2022-06-14'
+---
+
+
 ```{r Load libraries}
 library(dplyr)
 library(ggplot2)
@@ -410,7 +417,7 @@ Before we go, let's save our data to GCS for future use.
 
 ```{r Save data to GCS}
 f <- function(input, output){
-  write.csv2(input, file = output)
+  write.csv(input, file = output, row.names = FALSE)
 }
 gcs_upload_set_limit(2000000000L)
 gcs_upload(file = reviews, 

@@ -1,0 +1,264 @@
+---
+title: "02-preparing-text-for-modeling"
+output: html_document
+date: '2022-06-14'
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(googleCloudStorageR)
+library(gargle)
+library(pbapply)
+library(textcat)
+library(zoo)
+library(stm)
+library(tm)
+
+gcs_upload_set_limit(2000000000L)
+options(gargle_oauth_email = TRUE)
+scope <- c("https://www.googleapis.com/auth/cloud-platform")
+token <- token_fetch(scopes = scope)
+gcs_auth(token = token)
+gcs_global_bucket("development-bucket-0622")
+```
+
+In this notebook we're going to use the data from our previous notebook to build a topic model. In fact, we'll be building multiple topic models here. The first one will be a topic model on all the reviews, highlighting common themes across restaurants. The rest will be topic models specific to individual restaurants. That set of models should allow us to start to uncover specific themes in reviews of single restaurant.
+
+Considering that we have over 500,000 reviews, I'm going to be taking samples to the data to make this excercise more accessible. The final output will contain the full data, but I'm only going to work with smaller subsets here.
+
+First, let's load in the data from the last notebook.
+
+```{r}
+reviews <-
+  gcs_get_object('topic-model-dashboard/data/interim/New_York_reviews.csv')
+
+restaurant_sample <- sample(unique(reviews$restaurant_name), 20)
+
+reviews <- reviews[reviews$restaurant_name %in% restaurant_sample,]
+
+glimpse(reviews)
+```
+
+For the sake of consistency, let's first convert the columns to the correct format as defined by the authors.
+
+```{r}
+reviews$review_id <- factor(reviews$review_id)
+
+reviews$author_id <- factor(reviews$author_id)
+reviews$restaurant_name <- factor(reviews$restaurant_name)
+reviews$sample <- factor(reviews$sample)
+
+glimpse(reviews)
+```
+
+The authors have created a features they name `sample`. This turns the five point rating scale contained in `rating_review` into a binary variable which either takes a value of `Postive` or `Negative`.
+
+We'd like to use this variable in the construction of our topic model. This will assist in building topics that not only have similar words, but also have similar ratings.
+
+To do that however, we need to change this categorical variable into a numeric variable. We can do that easily with `plyr::mapvalues`; we'll replace `Positive` with `1` and `Negative` with `0`.
+
+Additionally, I'm going to name this new binary variable `score` instead of `sample` for clarity.
+
+```{r}
+reviews$score <- plyr::mapvalues(
+  as.factor(reviews$sample),
+  from = c("Positive", "Negative"),
+  to = c(1, 0)
+)
+```
+
+In addition to the score, we're going to include the year and month the review was submitted. Topics can change over time in proportion, especially when the topic focuses on a temporary issue. Knowing this, it'd be helpful to make that information available when building the topics.
+
+We can't pass a datetime as a covariate, so instead we'll encode each unique year/month combination as an ordinal integer.
+
+```{r}
+reviews$year_month <-
+  as.integer(as.factor(as.yearmon(lubridate::as_date(reviews$date))))
+```
+
+## Tidying up our text
+
+We have two different text variables available: `title_review` and `review_full`. `review_full` contains the majority of the data we're interested in, but we can still make use of `title_review`. To do that, let's concatenate those two variables into one.
+
+```{r}
+reviews$concat_review <- paste(reviews$title_review, reviews$review_full)
+
+glimpse(reviews)
+```
+
+### Confirming the reviews are in English
+
+We ought to confirm that all of the reviews we're working with are written in English. Reviews from other languages would quickly skew the results of our model. To check the language a review is written, we're going to use the `textcat` package.
+
+```{r}
+reviews$language <- unlist(pblapply(reviews$concat_review, textcat, cl = 4))
+english_pct <- mean(reviews$language == "english", na.rm=TRUE)
+
+cat(sprintf(
+  "%s of all the reviews seem to be written in English.",
+  scales::percent(english_pct)
+))
+```
+
+*Most* of the reviews are in English, but not all of them. To keep our results clean, let's only keep the reviews where English is detected as the language being used.
+
+```{r}
+reviews <- reviews[reviews$language=='english',]
+glimpse(reviews)
+```
+
+### Standardizing review text
+
+Now we'll take a pass at standardizing our text so it's ready to be used as an input. These processing steps are pretty standard across many applications, so we won't go in depth on each one. At a high level we're going to do the following to each review:
+
+-   Convert to lower case so words like "Steak" and "steak" are considered the same
+-   Remove punctuation so words at the end of sentence or that are followed by a comma are not counted separately
+-   Remove numbers since we're only interested in the words
+-   Remove ultra-common stopwords that don't add any context to the sentence
+-   Stem the words in each review so words like "parked" and "parking" are both represented as "park".
+
+```{r Basic clean}
+reviews$concat_review_clean <-
+  unlist(pblapply(reviews$concat_review, function(text) {
+    text <- tolower(text)
+    text <- removePunctuation(text)
+    text <- removeNumbers(text)
+    text <- removeWords(text, words = stopwords())
+    text <- stemDocument(text)
+    return(text)
+  }))
+
+```
+
+### Transform our data into the correct format
+
+While our text is cleaned, we need to get all of our data in the right format to be passed into our topic model. Luckily `stm` provides an easy to use function `textProcessor` which creates all the objects we need for the model. 
+
+As an aside, this function can do some of the text cleaning we did in the previous step if we didn't want to clean it separately. Since we've already done that, we'll set all the cleaning arguments to `FALSE`.
+```{r}
+processed <- stm::textProcessor(
+  reviews$concat_review_clean,
+  metadata = reviews,
+  lowercase = FALSE,
+  removestopwords = FALSE,
+  removenumbers = FALSE,
+  removepunctuation = FALSE,
+  ucp = FALSE,
+  stem = FALSE,
+  wordLengths = c(3, Inf),
+  sparselevel = .99,
+  language = "en",
+  verbose = FALSE,
+  onlycharacter = FALSE,
+  striphtml = FALSE,
+  customstopwords = NULL,
+  custompunctuation = NULL,
+  v1 = FALSE
+)
+
+out <-
+  prepDocuments(processed$documents, processed$vocab, processed$meta)
+
+docs <- out$documents
+vocab <- out$vocab
+meta <- out$meta
+```
+
+## Build our model
+
+### Search for an optimal number of topics
+
+```{r}
+model <- stm(
+  documents = docs,
+  vocab = vocab,
+  K = 0,
+  prevalence =  ~ score + s(year_month),
+  content = ~ score,
+  max.em.its = 10000,
+  emtol = 1e-07,
+  data = meta,
+  init.type = "Spectral",
+  verbose = FALSE
+)
+```
+
+
+### Search a topic model for each restaurant
+
+```{r}
+model_function <- function(restaurant_name, data) {
+  
+  restaurant_data <- data[data$restaurant_name == restaurant_name, ]
+
+  processed <- stm::textProcessor(
+    restaurant_data$concat_review_clean,
+    metadata = restaurant_data,
+    lowercase = FALSE,
+    removestopwords = FALSE,
+    removenumbers = FALSE,
+    removepunctuation = FALSE,
+    ucp = FALSE,
+    stem = FALSE,
+    wordLengths = c(3, Inf),
+    sparselevel = .99,
+    language = "en",
+    verbose = FALSE,
+    onlycharacter = FALSE,
+    striphtml = FALSE,
+    customstopwords = NULL,
+    custompunctuation = NULL,
+    v1 = FALSE
+  )
+  
+  out <-
+    prepDocuments(processed$documents, processed$vocab, processed$meta)
+  
+  docs <- out$documents
+  vocab <- out$vocab
+  meta <- out$meta
+  
+  if (length(docs) <= 100){
+    return(list())
+  }
+  
+  model <- stm(
+    documents = docs,
+    vocab = vocab,
+    K = 0,
+    prevalence =  ~ score + s(year_month),
+    content = ~ score,
+    max.em.its = 10000,
+    emtol = 1e-07,
+    data = meta,
+    init.type = "Spectral",
+    verbose = FALSE
+  )
+  
+  results <- list(
+    model, docs, vocab, meta
+  )
+  
+  names(results) <- c('model', 'docs', 'vocab', 'meta')
+  
+  return(results)
+}
+
+restaurant_names <- unique(reviews$restaurant_name)[1:3]
+restaurant_models <-
+  pblapply(restaurant_names, function(name)
+    model_function(restaurant_name = name, data = reviews))
+```
+
+```{r}
+
+gcs_save(
+  restaurant_models, 
+  file = 'topic-model-dashboard/data/interim/resaurant_models.Rdata'
+  )
+
+gcs_save(
+  restaurant_models, 
+  file = 'topic-model-dashboard/data/interim/resaurant_models.Rdata'
+  )
+```

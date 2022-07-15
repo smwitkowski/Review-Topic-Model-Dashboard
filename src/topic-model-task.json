@@ -1,0 +1,35 @@
+{
+    "family": "topic-model",
+    "taskRoleArn": "arn:aws:iam::003358677937:role/ecsTaskExecutionRole",
+    "executionRoleArn": "arn:aws:iam::003358677937:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "containerDefinitions": [
+        {
+            "name": "build-topic-model",
+            "image": "003358677937.dkr.ecr.us-east-1.amazonaws.com/topic-model-with-args",
+            "cpu": 2048,
+            "command": [
+                "--path",
+                "topic-model-dashboard/data/interim/New_York_reviews.csv",
+                "--bucket",
+                "topic-modeling-restaurant-reviews"
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-group": "topic-model-container",
+                    "awslogs-stream-prefix": "topic-model-task"
+                }
+            },
+            "memory": 8192,
+            "essential": true
+        }
+    ],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "4096",
+    "memory": "16384"
+}
