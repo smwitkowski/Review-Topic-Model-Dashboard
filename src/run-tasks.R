@@ -88,7 +88,7 @@ if (!args$cluster %in% existing_clusters) {
 }
 
 
-for (restaurant in unique_restaurants[1:5]) {
+for (restaurant in unique_restaurants) {
     logger::log_info("Running task for ", restaurant)
     task <- svc$run_task(
         cluster = args$cluster,
