@@ -210,7 +210,7 @@ shinyServer(function(input, output, session) {
                 range = c(-xlim, xlim)
                 ),
             hoverlabel = list(bgcolor = "white", align = "left"),
-            title = "Topic Distribution"
+            title = "Score Distribution"
         )
     })
 

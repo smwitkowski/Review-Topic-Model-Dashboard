@@ -9,8 +9,10 @@ shinyUI(
         fluidRow(
             column(
                 6,
-                h5("Instructions"),
-                p("Write some stuff here")
+                p('This dashboard contains topic models for New York City restaurants.'),
+                p('First, select a restaurant from the drop down found under "Restaurant Name". Two charts will be made available. The first titled "Topic Distribution" shows the percetage of documents that fall in each topic. By default, it only displays the top five topics. You can change the number of topics shown in that plot by adjusting the "Number of Topics to Display" slider.'),
+                p('The second chart titled "Score Distribution" shows how positive or negative the topics are according to the scores the reviews gave. This chart also changes with the previously mentioned slider.'),
+                p('For more information on this dashboard, visit the project\'s To dig deeping into a particular topic, there is a table at the bottom of the dashboard that shown the most "repesentative" reviews for a given topic. These reviews are shwon in order of how well they capture the essence of a topic. You can include or exclude particular topics by using the "Display Quotes from Topic Number" selector. Additionaly, you can increase or decrease the number of reviews shown by adjusting the "number of Reviews to Display per Topic" slider.')
             ),
             column(
                 3,
