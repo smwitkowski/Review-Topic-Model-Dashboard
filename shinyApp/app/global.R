@@ -39,12 +39,7 @@ bucket_objects <- svc$list_objects_v2(
 )
 
 file_paths <- unlist(lapply(bucket_objects$Contents, function(x) x$Key))
+sample_files <- sample(file_paths, n = 25)
 
-restaurant_data <- do.call(c, lapply(file_paths, load_data_objects))
+restaurant_data <- do.call(c, lapply(sample_files, load_data_objects))
 restaurant_names <- names(restaurant_data)
-
-simple_addition <- function(x, y){
-    ### This function adds x and y then subrtracts 1 from the result.
-    ### This is to make sure that the range of the slider is [0, 1].
-    
-}
