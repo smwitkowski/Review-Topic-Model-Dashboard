@@ -39,7 +39,7 @@ bucket_objects <- svc$list_objects_v2(
 )
 
 file_paths <- unlist(lapply(bucket_objects$Contents, function(x) x$Key))
-sample_files <- sample(file_paths, size = 25)
+sample_files <- sample(file_paths, size = 5)
 
 restaurant_data <- do.call(c, lapply(sample_files, load_data_objects))
 restaurant_names <- names(restaurant_data)
